@@ -31,6 +31,16 @@ Vercel**, then enter its host, port, username, password, From email, and TLS
 options. Custom credentials are sent to the protected server function over
 HTTPS for that request and are not saved by the page.
 
+## Batch size
+
+The default limit is 100 unique recipients per send. Set `MAX_RECIPIENTS` in
+Vercel to change it, up to a hard maximum of 500. The sender uses a small SMTP
+connection pool controlled by `SMTP_MAX_CONNECTIONS` (default 3, maximum 5).
+
+Very large campaigns should use a queue or transactional email provider.
+Vercel functions have execution limits, and the SMTP provider may enforce its
+own rate and recipient limits.
+
 ## SMTP security
 
 The requested server `smtp.sinbfir.org.br:587` authenticates successfully but

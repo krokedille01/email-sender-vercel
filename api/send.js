@@ -3,7 +3,8 @@
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 
-const MAX_RECIPIENTS = 20;
+const DEFAULT_MAX_RECIPIENTS = 100;
+const ABSOLUTE_MAX_RECIPIENTS = 500;
 const MAX_SUBJECT_LENGTH = 200;
 const MAX_BODY_LENGTH = 100000;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -22,6 +23,26 @@ function keysMatch(received, expected) {
 function parseRecipients(value) {
   const input = Array.isArray(value) ? value : String(value || "").split(/[\n,;]+/);
   return [...new Set(input.map((item) => String(item).trim().toLowerCase()).filter(Boolean))];
+}
+
+function getMaxRecipients() {
+  const configured = Number(process.env.MAX_RECIPIENTS || DEFAULT_MAX_RECIPIENTS);
+  if (!Number.isInteger(configured) || configured < 1) return DEFAULT_MAX_RECIPIENTS;
+  return Math.min(configured, ABSOLUTE_MAX_RECIPIENTS);
+}
+
+function getMaxConnections() {
+  const configured = Number(process.env.SMTP_MAX_CONNECTIONS || 3);
+  if (!Number.isInteger(configured) || configured < 1) return 3;
+  return Math.min(configured, 5);
+}
+
+function smtpErrorMessage(error) {
+  const code = error?.responseCode || error?.code || "SMTP error";
+  const message = String(error?.response || error?.message || "Delivery failed")
+    .replace(/[\r\n]+/g, " ")
+    .slice(0, 300);
+  return `${code}: ${message}`;
 }
 
 function requireEnvironment() {
@@ -71,12 +92,19 @@ module.exports = async function handler(req, res) {
     req.body?.fromName !== undefined ? req.body.fromName : process.env.FROM_NAME || ""
   ).trim();
   const smtp = getSmtpSettings(req.body?.smtp);
+  const maxRecipients = getMaxRecipients();
+  const invalidRecipients = recipients.filter((email) => !EMAIL_PATTERN.test(email));
 
-  if (!recipients.length || recipients.some((email) => !EMAIL_PATTERN.test(email))) {
-    return res.status(400).json({ error: "Enter valid recipient email addresses." });
+  if (!recipients.length) {
+    return res.status(400).json({ error: "Enter at least one recipient email address." });
   }
-  if (recipients.length > MAX_RECIPIENTS) {
-    return res.status(400).json({ error: `A maximum of ${MAX_RECIPIENTS} recipients is allowed.` });
+  if (invalidRecipients.length) {
+    const examples = invalidRecipients.slice(0, 10).join(", ");
+    const remaining = invalidRecipients.length > 10 ? ` and ${invalidRecipients.length - 10} more` : "";
+    return res.status(400).json({ error: `Invalid recipient address(es): ${examples}${remaining}` });
+  }
+  if (recipients.length > maxRecipients) {
+    return res.status(400).json({ error: `A maximum of ${maxRecipients} recipients is allowed per send.` });
   }
   if (!subject || subject.length > MAX_SUBJECT_LENGTH) {
     return res.status(400).json({ error: `Subject must be 1-${MAX_SUBJECT_LENGTH} characters.` });
@@ -105,6 +133,9 @@ module.exports = async function handler(req, res) {
   }
 
   const transporter = nodemailer.createTransport({
+    pool: true,
+    maxConnections: getMaxConnections(),
+    maxMessages: 50,
     host: smtp.host,
     port: smtp.port,
     secure: smtp.secure,
@@ -125,10 +156,10 @@ module.exports = async function handler(req, res) {
   const from = fromName
     ? { name: fromName, address: smtp.fromEmail }
     : smtp.fromEmail;
-  const results = [];
 
   try {
-    for (const recipient of recipients) {
+    const results = await Promise.all(
+      recipients.map(async (recipient) => {
       try {
         await transporter.sendMail({
           from,
@@ -137,20 +168,26 @@ module.exports = async function handler(req, res) {
           replyTo: smtp.replyTo || smtp.fromEmail,
           [format]: body,
         });
-        results.push({ email: recipient, sent: true });
+          return { email: recipient, sent: true };
       } catch (error) {
         console.error(`Send failed for ${recipient}:`, error.message);
-        results.push({ email: recipient, sent: false });
+          return { email: recipient, sent: false, error: smtpErrorMessage(error) };
       }
-    }
+      })
+    );
+
+    const sent = results.filter((result) => result.sent).length;
+    const failed = recipients.length - sent;
+    const firstFailure = results.find((result) => !result.sent);
+    return res.status(failed === 0 ? 200 : 502).json({
+      ...(failed
+        ? { error: `Sent ${sent}; failed ${failed}. ${firstFailure.error}` }
+        : {}),
+      sent,
+      failed,
+      results,
+    });
   } finally {
     transporter.close();
   }
-
-  const sent = results.filter((result) => result.sent).length;
-  return res.status(sent === recipients.length ? 200 : 502).json({
-    sent,
-    failed: recipients.length - sent,
-    results,
-  });
 };

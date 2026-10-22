@@ -188,7 +188,7 @@
 
         <label for="recipients">Recipients</label>
         <textarea id="recipients" placeholder="person@example.com&#10;another@example.com" required></textarea>
-        <p class="hint">One address per line, up to 20.</p>
+        <p class="hint">One address per line. The default limit is 100 per send.</p>
 
         <div class="grid">
           <div>
@@ -269,7 +269,13 @@
           });
           const data = await response.json();
           if (!response.ok) {
-            throw new Error(data.error || `Request failed (${response.status})`);
+            const failedAddresses = Array.isArray(data.results)
+              ? data.results.filter((result) => !result.sent).map((result) => result.email)
+              : [];
+            const details = failedAddresses.length
+              ? `\nFailed: ${failedAddresses.join(", ")}`
+              : "";
+            throw new Error((data.error || `Request failed (${response.status})`) + details);
           }
           status.className = "success";
           status.textContent = `Sent: ${data.sent} · Failed: ${data.failed}`;
