@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Secure Email Sender</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+        background: #07111f;
+        color: #e8eef7;
+      }
+      * { box-sizing: border-box; }
+      body {
+        min-height: 100vh;
+        margin: 0;
+        padding: 32px 16px;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at 15% 15%, #143765 0, transparent 34%),
+          radial-gradient(circle at 90% 85%, #123d32 0, transparent 30%),
+          #07111f;
+      }
+      main {
+        width: min(760px, 100%);
+        padding: clamp(22px, 5vw, 42px);
+        border: 1px solid #27415f;
+        border-radius: 22px;
+        background: rgba(10, 24, 42, .92);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, .38);
+      }
+      h1 { margin: 0 0 8px; font-size: clamp(28px, 5vw, 42px); }
+      .intro { margin: 0 0 28px; color: #9db0c8; }
+      label { display: block; margin: 18px 0 7px; font-weight: 700; }
+      input, textarea, select, button {
+        width: 100%;
+        border: 1px solid #36516f;
+        border-radius: 11px;
+        background: #09182a;
+        color: #f4f7fb;
+        font: inherit;
+      }
+      input, textarea, select { padding: 12px 14px; }
+      input:focus, textarea:focus, select:focus {
+        outline: 2px solid #45a8ff;
+        border-color: transparent;
+      }
+      textarea { min-height: 105px; resize: vertical; }
+      #body { min-height: 220px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .grid { display: grid; grid-template-columns: 1fr 160px; gap: 16px; }
+      button {
+        margin-top: 24px;
+        padding: 14px 18px;
+        border: 0;
+        background: linear-gradient(135deg, #4eaaff, #41d39a);
+        color: #04101c;
+        font-weight: 800;
+        cursor: pointer;
+      }
+      button:hover { filter: brightness(1.08); }
+      button:disabled { cursor: wait; filter: grayscale(.6); opacity: .7; }
+      .hint { margin-top: 6px; color: #8298b2; font-size: 13px; }
+      #status {
+        display: none;
+        margin-top: 18px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        white-space: pre-wrap;
+      }
+      #status.success { display: block; background: #103a2e; color: #92f0ca; }
+      #status.error { display: block; background: #461d27; color: #ffb4c0; }
+      @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Email sender</h1>
+      <p class="intro">Send through the private SMTP configuration stored on Vercel.</p>
+
+      <form id="send-form">
+        <label for="key">Access key</label>
+        <input id="key" type="password" autocomplete="current-password" required>
+        <p class="hint">This must match the SEND_API_KEY configured on Vercel.</p>
+
+        <label for="recipients">Recipients</label>
+        <textarea id="recipients" placeholder="person@example.com&#10;another@example.com" required></textarea>
+        <p class="hint">One address per line, up to 20.</p>
+
+        <div class="grid">
+          <div>
+            <label for="subject">Subject</label>
+            <input id="subject" maxlength="200" required>
+          </div>
+          <div>
+            <label for="format">Format</label>
+            <select id="format">
+              <option value="html">HTML</option>
+              <option value="text">Plain text</option>
+            </select>
+          </div>
+        </div>
+
+        <label for="body">Message</label>
+        <textarea id="body" maxlength="100000" placeholder="<p>Hello!</p>" required></textarea>
+
+        <button id="submit" type="submit">Send email</button>
+        <div id="status" role="status" aria-live="polite"></div>
+      </form>
+    </main>
+
+    <script>
+      const form = document.querySelector("#send-form");
+      const button = document.querySelector("#submit");
+      const status = document.querySelector("#status");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        button.disabled = true;
+        button.textContent = "Sending…";
+        status.className = "";
+        status.textContent = "";
+
+        try {
+          const response = await fetch("/api/send", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-API-Key": document.querySelector("#key").value,
+            },
+            body: JSON.stringify({
+              recipients: document.querySelector("#recipients").value,
+              subject: document.querySelector("#subject").value,
+              format: document.querySelector("#format").value,
+              body: document.querySelector("#body").value,
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || `Request failed (${response.status})`);
+          }
+          status.className = "success";
+          status.textContent = `Sent: ${data.sent} · Failed: ${data.failed}`;
+        } catch (error) {
+          status.className = "error";
+          status.textContent = error.message;
+        } finally {
+          button.disabled = false;
+          button.textContent = "Send email";
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "email-sender-vercel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Password-protected Vercel web sender using SMTP",
+  "scripts": {
+    "dev": "npx vercel@latest dev"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "nodemailer": "^10.2.0"
+  }
+}
