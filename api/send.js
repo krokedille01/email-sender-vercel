@@ -25,18 +25,23 @@ function parseRecipients(value) {
 }
 
 function requireEnvironment() {
-  const names = [
-    "SMTP_HOST",
-    "SMTP_PORT",
-    "SMTP_USER",
-    "SMTP_PASS",
-    "FROM_EMAIL",
-    "SEND_API_KEY",
-  ];
-  const missing = names.filter((name) => !process.env[name]);
-  if (missing.length) {
-    throw new Error(`Missing server configuration: ${missing.join(", ")}`);
-  }
+  if (!process.env.SEND_API_KEY) throw new Error("Missing SEND_API_KEY");
+}
+
+function getSmtpSettings(input) {
+  const custom = input && typeof input === "object";
+  const source = custom ? input : process.env;
+  return {
+    custom,
+    host: String(custom ? source.host : source.SMTP_HOST || "").trim(),
+    port: Number(custom ? source.port : source.SMTP_PORT),
+    secure: isTrue(custom ? source.secure : source.SMTP_SECURE),
+    requireTLS: isTrue(custom ? source.requireTLS : source.SMTP_REQUIRE_TLS),
+    user: String(custom ? source.user : source.SMTP_USER || "").trim(),
+    pass: String(custom ? source.pass : source.SMTP_PASS || ""),
+    fromEmail: String(custom ? source.fromEmail : source.FROM_EMAIL || "").trim(),
+    replyTo: String(custom ? source.replyTo : source.REPLY_TO || "").trim(),
+  };
 }
 
 module.exports = async function handler(req, res) {
@@ -62,6 +67,10 @@ module.exports = async function handler(req, res) {
   const subject = String(req.body?.subject || "").trim();
   const body = String(req.body?.body || "");
   const format = req.body?.format === "text" ? "text" : "html";
+  const fromName = String(
+    req.body?.fromName !== undefined ? req.body.fromName : process.env.FROM_NAME || ""
+  ).trim();
+  const smtp = getSmtpSettings(req.body?.smtp);
 
   if (!recipients.length || recipients.some((email) => !EMAIL_PATTERN.test(email))) {
     return res.status(400).json({ error: "Enter valid recipient email addresses." });
@@ -75,23 +84,37 @@ module.exports = async function handler(req, res) {
   if (!body.trim() || body.length > MAX_BODY_LENGTH) {
     return res.status(400).json({ error: `Message must be 1-${MAX_BODY_LENGTH} characters.` });
   }
-
-  const port = Number(process.env.SMTP_PORT);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    return res.status(500).json({ error: "The SMTP port is invalid." });
+  if (fromName.length > 100) {
+    return res.status(400).json({ error: "From name must be 100 characters or fewer." });
+  }
+  if (
+    !/^[a-z0-9.-]{1,253}$/i.test(smtp.host) ||
+    !Number.isInteger(smtp.port) ||
+    smtp.port < 1 ||
+    smtp.port > 65535 ||
+    !smtp.user ||
+    !smtp.pass ||
+    !EMAIL_PATTERN.test(smtp.fromEmail) ||
+    (smtp.replyTo && !EMAIL_PATTERN.test(smtp.replyTo))
+  ) {
+    return res.status(smtp.custom ? 400 : 500).json({
+      error: smtp.custom
+        ? "Enter complete and valid custom SMTP settings."
+        : "The saved SMTP configuration is incomplete or invalid.",
+    });
   }
 
   const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port,
-    secure: isTrue(process.env.SMTP_SECURE),
-    requireTLS: isTrue(process.env.SMTP_REQUIRE_TLS),
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.secure,
+    requireTLS: smtp.requireTLS,
     connectionTimeout: 15000,
     greetingTimeout: 10000,
     socketTimeout: 30000,
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+      user: smtp.user,
+      pass: smtp.pass,
     },
     tls: {
       minVersion: "TLSv1.2",
@@ -99,9 +122,9 @@ module.exports = async function handler(req, res) {
     },
   });
 
-  const from = process.env.FROM_NAME
-    ? { name: process.env.FROM_NAME, address: process.env.FROM_EMAIL }
-    : process.env.FROM_EMAIL;
+  const from = fromName
+    ? { name: fromName, address: smtp.fromEmail }
+    : smtp.fromEmail;
   const results = [];
 
   try {
@@ -111,7 +134,7 @@ module.exports = async function handler(req, res) {
           from,
           to: recipient,
           subject,
-          replyTo: process.env.REPLY_TO || process.env.FROM_EMAIL,
+          replyTo: smtp.replyTo || smtp.fromEmail,
           [format]: body,
         });
         results.push({ email: recipient, sent: true });

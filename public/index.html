@@ -50,6 +50,50 @@
       textarea { min-height: 105px; resize: vertical; }
       #body { min-height: 220px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
       .grid { display: grid; grid-template-columns: 1fr 160px; gap: 16px; }
+      .smtp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      fieldset {
+        margin: 24px 0 0;
+        padding: 18px;
+        border: 1px solid #2e4967;
+        border-radius: 14px;
+      }
+      legend { padding: 0 8px; font-weight: 800; }
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 4px 0;
+        cursor: pointer;
+      }
+      input[type="checkbox"] { width: auto; accent-color: #45a8ff; }
+      .smtp-choice {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .smtp-choice label { margin: 0; cursor: pointer; }
+      .smtp-choice input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .smtp-choice span {
+        display: block;
+        padding: 11px 12px;
+        border: 1px solid #36516f;
+        border-radius: 10px;
+        color: #a9bad0;
+        text-align: center;
+      }
+      .smtp-choice input:checked + span {
+        border-color: #45a8ff;
+        background: #153858;
+        color: #ffffff;
+        box-shadow: 0 0 0 1px #45a8ff;
+      }
+      .smtp-choice input:focus-visible + span { outline: 2px solid #41d39a; }
+      [hidden] { display: none !important; }
       button {
         margin-top: 24px;
         padding: 14px 18px;
@@ -71,7 +115,9 @@
       }
       #status.success { display: block; background: #103a2e; color: #92f0ca; }
       #status.error { display: block; background: #461d27; color: #ffb4c0; }
-      @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+      @media (max-width: 560px) {
+        .grid, .smtp-grid { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
@@ -83,6 +129,62 @@
         <label for="key">Access key</label>
         <input id="key" type="password" autocomplete="current-password" required>
         <p class="hint">This must match the SEND_API_KEY configured on Vercel.</p>
+
+        <label for="from-name">From name</label>
+        <input id="from-name" maxlength="100" placeholder="Company or person name">
+        <p class="hint">You can change this for every send.</p>
+
+        <fieldset>
+          <legend>SMTP settings</legend>
+          <div class="smtp-choice" role="radiogroup" aria-label="SMTP source">
+            <label>
+              <input type="radio" name="smtp-mode" value="saved" checked>
+              <span>Vercel ENV SMTP</span>
+            </label>
+            <label>
+              <input type="radio" name="smtp-mode" value="custom">
+              <span>Webpage SMTP</span>
+            </label>
+          </div>
+
+          <div id="custom-smtp" hidden>
+            <div class="grid smtp-grid">
+              <div>
+                <label for="smtp-host">SMTP host</label>
+                <input id="smtp-host" value="smtp.sinbfir.org.br" data-required>
+              </div>
+              <div>
+                <label for="smtp-port">Port</label>
+                <input id="smtp-port" type="number" min="1" max="65535" value="587" data-required>
+              </div>
+              <div>
+                <label for="smtp-user">Username</label>
+                <input id="smtp-user" type="text" autocomplete="username" value="sandro@sinbfir.org.br" data-required>
+              </div>
+              <div>
+                <label for="smtp-pass">Password</label>
+                <input id="smtp-pass" type="password" autocomplete="new-password" data-required>
+              </div>
+              <div>
+                <label for="from-email">From email</label>
+                <input id="from-email" type="email" value="sandro@sinbfir.org.br" data-required>
+              </div>
+              <div>
+                <label for="reply-to">Reply-to</label>
+                <input id="reply-to" type="email" value="sandro@sinbfir.org.br">
+              </div>
+            </div>
+            <label class="check" for="smtp-secure">
+              <input id="smtp-secure" type="checkbox">
+              Use implicit SSL/TLS (normally port 465)
+            </label>
+            <label class="check" for="smtp-require-tls">
+              <input id="smtp-require-tls" type="checkbox">
+              Require STARTTLS (normally port 587)
+            </label>
+            <p class="hint">Custom credentials are used for this request only and are not saved by this page.</p>
+          </div>
+        </fieldset>
 
         <label for="recipients">Recipients</label>
         <textarea id="recipients" placeholder="person@example.com&#10;another@example.com" required></textarea>
@@ -114,6 +216,20 @@
       const form = document.querySelector("#send-form");
       const button = document.querySelector("#submit");
       const status = document.querySelector("#status");
+      const smtpModes = document.querySelectorAll('input[name="smtp-mode"]');
+      const customSmtp = document.querySelector("#custom-smtp");
+
+      function updateSmtpMode() {
+        const useSaved = document.querySelector('input[name="smtp-mode"]:checked').value === "saved";
+        customSmtp.hidden = useSaved;
+        customSmtp.querySelectorAll("input").forEach((input) => {
+          input.disabled = useSaved;
+          input.required = !useSaved && input.hasAttribute("data-required");
+        });
+      }
+
+      smtpModes.forEach((input) => input.addEventListener("change", updateSmtpMode));
+      updateSmtpMode();
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -123,6 +239,19 @@
         status.textContent = "";
 
         try {
+          const useSaved = document.querySelector('input[name="smtp-mode"]:checked').value === "saved";
+          const smtp = useSaved
+            ? undefined
+            : {
+                host: document.querySelector("#smtp-host").value,
+                port: Number(document.querySelector("#smtp-port").value),
+                secure: document.querySelector("#smtp-secure").checked,
+                requireTLS: document.querySelector("#smtp-require-tls").checked,
+                user: document.querySelector("#smtp-user").value,
+                pass: document.querySelector("#smtp-pass").value,
+                fromEmail: document.querySelector("#from-email").value,
+                replyTo: document.querySelector("#reply-to").value,
+              };
           const response = await fetch("/api/send", {
             method: "POST",
             headers: {
@@ -134,6 +263,8 @@
               subject: document.querySelector("#subject").value,
               format: document.querySelector("#format").value,
               body: document.querySelector("#body").value,
+              fromName: document.querySelector("#from-name").value,
+              smtp,
             }),
           });
           const data = await response.json();

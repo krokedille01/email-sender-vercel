@@ -21,6 +21,16 @@ The web form requires `SEND_API_KEY` before the API will send. Do not put the
 SMTP password in `public/index.html`, commit an `.env` file, or share the access
 key publicly.
 
+## Changing sender settings
+
+The form uses the SMTP variables saved in Vercel by default. The **From name**
+can be changed for every send.
+
+To use another account temporarily, clear **Use SMTP settings saved in
+Vercel**, then enter its host, port, username, password, From email, and TLS
+options. Custom credentials are sent to the protected server function over
+HTTPS for that request and are not saved by the page.
+
 ## SMTP security
 
 The requested server `smtp.sinbfir.org.br:587` authenticates successfully but
